@@ -1,51 +1,63 @@
 const express = require('express');
-// const Roster = require('../models/Roster'); // Import the updated CabinCrew model
+
+const sqlDb = require('../db/sqlDb');
+const Roster = require('../models/Roster');
+const RosterInfo = require('../models/RosterInfo');
 const PassengerInfo = require('../models/Passenger');
 const CabinCrew = require('../models/CabinCrew');
 const Pilot = require('../models/Pilot');
 
+
 const router = express.Router();
 
-//GET route combining all the information
-router.get('/all', async (req, res) => {
+// Save roster in NoSQL database
+router.post('/save-nosql', async (req, res) => {
     try {
-        const passengerInfo = await PassengerInfo.find();
-        const cabinCrew = await CabinCrew.find();
-        const pilots = await Pilot.find();
-
-        res.json({passengerInfo, cabinCrew, pilots});
+        const rosterInfo = new RosterInfo(req.body.flightData);
+        await rosterInfo.save();
+        res.status(201).json({ message: 'Roster saved in NoSQL database' });
     } catch (err) {
-        console.error('Error retrieving roster entries:', err); // Log the error
+        console.error('Error saving roster to NoSQL database:', err);
+        res.status(500).json({ message: err.message });
+    }
+});
+  
+  // Save roster in SQL database
+router.post('/save-sql', async (req, res) => {
+    const { flightData } = req.body;
+    try {
+      const query = 'INSERT INTO rosters (flight_data) VALUES (?)';
+      await sqlDb.query(query, [JSON.stringify(flightData)]);
+      res.status(201).json({ message: 'Roster saved in SQL database' });
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+// GET route combining all the information for a specific flight
+router.get('/flight/:flightNumber', async (req, res) => {
+    try {
+        // Find the roster entry by flight number
+        const rosterEntry = await Roster.findOne({ FlightNumber: req.params.flightNumber });
+
+        if (!rosterEntry) {
+            return res.status(404).json({ message: 'Roster entry not found' });
+        }
+
+        // Fetch the pilot information
+        const pilot = await Pilot.findOne({ PilotID: rosterEntry.PilotID });
+
+        // Fetch the cabin crew information
+        const crew = await CabinCrew.find({ CrewID: { $in: rosterEntry.CrewIDs } });
+
+        // Fetch the passenger information
+        const passengers = await PassengerInfo.find({ passenger_id: { $in: rosterEntry.PassengerIDs } });
+
+        res.json({ flight: rosterEntry, pilot, crew, passengers });
+    } catch (err) {
+        console.error('Error retrieving roster entry:', err);
         res.status(500).json({ message: err.message });
     }
 });
 
-// //GET route combining all the information in a specific flight
-// router.get('/flight/:id', async (req, res) => {
-//     try {
-//         const passengerInfo = await PassengerInfo.find({Flight_ID: req.params.id});
-//         const cabinCrew = await CabinCrew.find({Flight_ID: req.params.id});
-//         const pilots = await Pilot.find({Flight_ID: req.params.id});
-
-//         res.json({passengerInfo, cabinCrew, pilots});
-//     } catch (err) {
-//         console.error('Error retrieving roster entries:', err); // Log the error
-//         res.status(500).json({ message: err.message });
-//     }
-// });
-
-// //POST route to add FLight_ID attribute to a pilot
-// router.post('/pilot/:id', async (req, res) => {
-//     try {
-//         const pilot = await Pilot.findById(req.params.id);
-//         if (!pilot) return res.status(404).json({ message: 'Pilot not found' });
-
-//         pilot.Flight_ID = req.body.Flight_ID;
-//         const updatedPilot = await pilot.save();
-//         res.json(updatedPilot);
-//     } catch (err) {
-//         res.status(400).json({ message: err.message });
-//     }
-// });
-
-module.exports = router; // Export the router for use in the main app file
+module.exports = router;
